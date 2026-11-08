@@ -1,0 +1,6 @@
+# Source material values from supplied GLB. Runtime shader applies planetary palettes.
+newmtl SphereGrey
+Kd 0.7991 0.7991 0.7991
+Ka 0.05 0.05 0.05
+Ks 0.50 0.50 0.50
+Ns 64.0

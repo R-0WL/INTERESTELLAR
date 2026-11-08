@@ -1,0 +1,11 @@
+[package]
+name = "interstellar_rust"
+version = "0.1.0"
+edition = "2021"
+authors = ["Interstellar Rust adaptation"]
+description = "A small 3D space-flight game rendered with a custom software rasterizer"
+
+[dependencies]
+minifb = "0.27"
+nalgebra-glm = "0.19"
+font8x8 = "0.3"
