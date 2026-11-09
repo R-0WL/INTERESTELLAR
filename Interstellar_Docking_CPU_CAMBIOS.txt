@@ -1,0 +1,1159 @@
+INTERSTELLAR DOCKING — CAMBIOS PARA RENDERIZADO CPU
+========================================================================
+
+INSTRUCCIONES IMPORTANTES
+- Este TXT contiene los archivos de texto modificados del proyecto.
+- Copia cada bloque en su ruta indicada, reemplazando el archivo anterior.
+- Conserva las carpetas binarias assets/models con endurance.glb y lander.glb.
+- Conserva references/docking_hud_reference.jpg si ya existe.
+- Abre la terminal en la carpeta raíz del proyecto y ejecuta: cargo run --release
+- El proyecto usa Rust edition 2024 y dependencias declaradas en Cargo.toml.
+
+ARCHIVOS INCLUIDOS
+  * Cargo.toml (350 bytes)
+  * run_cpu.bat (128 bytes)
+  * src/main.rs (37416 bytes)
+  * README.md (4200 bytes)
+
+
+========================================================================
+INICIO DEL ARCHIVO: Cargo.toml
+========================================================================
+
+[package]
+name = "interstellar_docking_cpu"
+version = "0.2.0"
+edition = "2024"
+rust-version = "1.85"
+description = "CPU-only software-rendered orbital docking mini-game in Rust"
+license = "MIT"
+
+[dependencies]
+glam = "0.29"
+gltf = "1.4.1"
+minifb = "0.29.0"
+
+[profile.dev]
+opt-level = 2
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+
+========================================================================
+FIN DEL ARCHIVO: Cargo.toml
+========================================================================
+
+========================================================================
+INICIO DEL ARCHIVO: run_cpu.bat
+========================================================================
+
+@echo off
+cd /d "%~dp0"
+echo Starting INTERSTELLAR Docking - CPU Software Renderer...
+cargo run --release
+if errorlevel 1 pause
+
+========================================================================
+FIN DEL ARCHIVO: run_cpu.bat
+========================================================================
+
+========================================================================
+INICIO DEL ARCHIVO: src/main.rs
+========================================================================
+
+use glam::{Mat4, Quat, Vec3};
+use minifb::{Key, KeyRepeat, UseGPU, Window, WindowOptions};
+use std::error::Error;
+use std::f32::consts::{FRAC_PI_2, PI, TAU};
+use std::path::Path;
+use std::time::Instant;
+
+const WIDTH: usize = 1280;
+const HEIGHT: usize = 720;
+const ENDURANCE_RPM: f32 = -68.0;
+const MONITOR_RPM: f32 = -15.0;
+const TARGET_PORT_X: f32 = -10.8;
+const LANDER_SCALE: f32 = 5.0;
+const LANDER_NOSE_OFFSET: f32 = 0.74 * LANDER_SCALE;
+const ROTATION_ACCEL_RPM_S: f32 = 220.0;
+const MAX_LANDER_RPM: f32 = 90.0;
+const APPROACH_SPEED: f32 = 0.75;
+const EARTH_MU: f64 = 3.986_004_418e14;
+const EARTH_RADIUS_M: f64 = 6_371_000.0;
+const ORBIT_ALTITUDE_M: f64 = 520_000.0;
+const ORBIT_RADIUS_M: f64 = EARTH_RADIUS_M + ORBIT_ALTITUDE_M;
+
+fn main() -> Result<(), Box<dyn Error>> {
+    let endurance_path = Path::new("assets/models/endurance.glb");
+    let lander_path = Path::new("assets/models/lander.glb");
+    let endurance = load_gltf_model(endurance_path)?;
+    let lander = load_gltf_model(lander_path)?;
+    println!(
+        "CPU renderer ready: {} Endurance triangles, {} Lander triangles",
+        endurance.triangles.len(),
+        lander.triangles.len()
+    );
+
+    let mut window = Window::new(
+        "INTERSTELLAR // CPU SOFTWARE DOCKING",
+        WIDTH,
+        HEIGHT,
+        WindowOptions {
+            resize: false,
+            use_gpu: UseGPU::Disabled,
+            ..WindowOptions::default()
+        },
+    )?;
+    window.set_target_fps(30);
+
+    let mut framebuffer = Framebuffer::new(WIDTH, HEIGHT);
+    let mut game = GameState::default();
+    let mut camera = Camera::default();
+    let mut last_frame = Instant::now();
+    let mut fps_smooth = 30.0_f32;
+    let stars = make_starfield();
+
+    while window.is_open() && !window.is_key_down(Key::Escape) {
+        let now = Instant::now();
+        let dt = (now - last_frame).as_secs_f32().clamp(0.001, 0.05);
+        last_frame = now;
+        fps_smooth = fps_smooth * 0.92 + (1.0 / dt) * 0.08;
+
+        let pressed = window.get_keys_pressed(KeyRepeat::No);
+        let input = InputState {
+            left: window.is_key_down(Key::A) || window.is_key_down(Key::Left),
+            right: window.is_key_down(Key::D) || window.is_key_down(Key::Right),
+            up: window.is_key_down(Key::W) || window.is_key_down(Key::Up),
+            down: window.is_key_down(Key::S) || window.is_key_down(Key::Down),
+            approach: pressed.contains(&Key::E),
+            reset: pressed.contains(&Key::R),
+            camera: pressed.contains(&Key::C),
+        };
+        update_simulation(&mut game, input, dt);
+        update_camera(&mut camera, &game, dt);
+
+        framebuffer.clear(0x020711);
+        render_starfield(&mut framebuffer, &camera, &stars);
+        render_scene(
+            &mut framebuffer,
+            &camera,
+            &game,
+            &endurance,
+            &lander,
+        );
+        render_hud(&mut framebuffer, &game, fps_smooth);
+
+        window.update_with_buffer(&framebuffer.color, WIDTH, HEIGHT)?;
+    }
+    Ok(())
+}
+
+#[derive(Clone, Copy, Debug)]
+struct Vertex {
+    position: Vec3,
+    normal: Vec3,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct Triangle {
+    a: Vertex,
+    b: Vertex,
+    c: Vertex,
+    color: Vec3,
+}
+
+#[derive(Clone, Debug, Default)]
+struct CpuModel {
+    triangles: Vec<Triangle>,
+}
+
+fn load_gltf_model(path: &Path) -> Result<CpuModel, Box<dyn Error>> {
+    let (document, buffers, _images) = gltf::import(path)?;
+    let mut model = CpuModel::default();
+    let scene = document
+        .default_scene()
+        .or_else(|| document.scenes().next())
+        .ok_or_else(|| format!("{} no contiene una escena glTF", path.display()))?;
+
+    for node in scene.nodes() {
+        collect_node(node, Mat4::IDENTITY, &buffers, &mut model)?;
+    }
+    if model.triangles.is_empty() {
+        return Err(format!("{} no contiene primitivas triangulares", path.display()).into());
+    }
+    Ok(model)
+}
+
+fn collect_node(
+    node: gltf::Node<'_>,
+    parent_transform: Mat4,
+    buffers: &[gltf::buffer::Data],
+    output: &mut CpuModel,
+) -> Result<(), Box<dyn Error>> {
+    let local = Mat4::from_cols_array_2d(&node.transform().matrix());
+    let world = parent_transform * local;
+
+    if let Some(mesh) = node.mesh() {
+        for primitive in mesh.primitives() {
+            if primitive.mode() != gltf::mesh::Mode::Triangles {
+                continue;
+            }
+            let reader = primitive.reader(|buffer| Some(&buffers[buffer.index()]));
+            let Some(position_reader) = reader.read_positions() else {
+                continue;
+            };
+            let positions: Vec<Vec3> = position_reader.map(Vec3::from_array).collect();
+            if positions.len() < 3 {
+                continue;
+            }
+            let normals: Vec<Vec3> = reader
+                .read_normals()
+                .map(|values| values.map(Vec3::from_array).collect())
+                .unwrap_or_default();
+            let indices: Vec<u32> = reader
+                .read_indices()
+                .map(|values| values.into_u32().collect())
+                .unwrap_or_else(|| (0..positions.len() as u32).collect());
+
+            let material = primitive.material();
+            let pbr = material.pbr_metallic_roughness();
+            let factor = pbr.base_color_factor();
+            let mat_name = material.name().unwrap_or("").to_ascii_lowercase();
+            let color = if mat_name.contains("glass") {
+                Vec3::new(0.22, 0.55, 0.72)
+            } else {
+                Vec3::new(
+                    factor[0].max(0.36),
+                    factor[1].max(0.38),
+                    factor[2].max(0.42),
+                )
+            };
+
+            let transformed_positions: Vec<Vec3> = positions
+                .iter()
+                .map(|p| world.transform_point3(*p))
+                .collect();
+            let transformed_normals: Vec<Vec3> = normals
+                .iter()
+                .map(|n| world.transform_vector3(*n).normalize_or_zero())
+                .collect();
+
+            for indices3 in indices.chunks_exact(3) {
+                let ia = indices3[0] as usize;
+                let ib = indices3[1] as usize;
+                let ic = indices3[2] as usize;
+                if ia >= positions.len() || ib >= positions.len() || ic >= positions.len() {
+                    continue;
+                }
+                let pa = transformed_positions[ia];
+                let pb = transformed_positions[ib];
+                let pc = transformed_positions[ic];
+                let face_normal = (pb - pa).cross(pc - pa).normalize_or_zero();
+                let na = transformed_normals.get(ia).copied().unwrap_or(face_normal);
+                let nb = transformed_normals.get(ib).copied().unwrap_or(face_normal);
+                let nc = transformed_normals.get(ic).copied().unwrap_or(face_normal);
+                output.triangles.push(Triangle {
+                    a: Vertex { position: pa, normal: if na.length_squared() < 0.1 { face_normal } else { na } },
+                    b: Vertex { position: pb, normal: if nb.length_squared() < 0.1 { face_normal } else { nb } },
+                    c: Vertex { position: pc, normal: if nc.length_squared() < 0.1 { face_normal } else { nc } },
+                    color,
+                });
+            }
+        }
+    }
+
+    for child in node.children() {
+        collect_node(child, world, buffers, output)?;
+    }
+    Ok(())
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum GamePhase {
+    Active,
+    Docked,
+    Collision,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CameraMode {
+    Automatic,
+    Wide,
+    Chase,
+    Docking,
+}
+
+#[derive(Debug)]
+struct GameState {
+    elapsed: f32,
+    endurance_angle: f32,
+    lander_angle: f32,
+    lander_rpm: f32,
+    altitude: f32,
+    distance: f32,
+    approach_enabled: bool,
+    vertical_speed: f32,
+    relative_x_speed: f32,
+    lateral_offset: f32,
+    lateral_speed: f32,
+    phase: GamePhase,
+    camera_mode: CameraMode,
+    orbit_angle: f64,
+    gravity_m_s2: f64,
+}
+
+impl Default for GameState {
+    fn default() -> Self {
+        Self {
+            elapsed: 0.0,
+            endurance_angle: 0.0,
+            lander_angle: -63.0_f32.to_radians(),
+            lander_rpm: 0.0,
+            altitude: 2.0,
+            distance: 22.0,
+            approach_enabled: false,
+            vertical_speed: 0.0,
+            relative_x_speed: 0.0,
+            lateral_offset: 0.0,
+            lateral_speed: 0.0,
+            phase: GamePhase::Active,
+            camera_mode: CameraMode::Automatic,
+            orbit_angle: 0.0,
+            gravity_m_s2: EARTH_MU / ORBIT_RADIUS_M.powi(2),
+        }
+    }
+}
+
+impl GameState {
+    fn lander_position(&self) -> Vec3 {
+        Vec3::new(
+            TARGET_PORT_X - self.distance - LANDER_NOSE_OFFSET,
+            self.altitude,
+            self.lateral_offset,
+        )
+    }
+
+    fn phase_error_rad(&self) -> f32 {
+        wrap_angle(self.lander_angle - self.endurance_angle)
+    }
+
+    fn rpm_error(&self) -> f32 {
+        (self.lander_rpm - ENDURANCE_RPM).abs()
+    }
+
+    fn alignment_percent(&self) -> f32 {
+        let speed_score = (1.0 - self.rpm_error() / 10.0).clamp(0.0, 1.0);
+        let phase_score =
+            (1.0 - self.phase_error_rad().abs() / 18.0_f32.to_radians()).clamp(0.0, 1.0);
+        let height_score = (1.0 - self.altitude.abs() / 1.25).clamp(0.0, 1.0);
+        (100.0 * (0.50 * speed_score + 0.35 * phase_score + 0.15 * height_score))
+            .clamp(0.0, 100.0)
+    }
+
+    fn hard_lock(&self) -> bool {
+        self.rpm_error() <= 0.8
+            && self.phase_error_rad().abs() <= 2.0_f32.to_radians()
+            && self.altitude.abs() <= 0.20
+            && self.lateral_offset.abs() <= 0.20
+    }
+
+    fn can_approach(&self) -> bool {
+        self.alignment_percent() >= 84.0
+            && self.rpm_error() <= 3.5
+            && self.phase_error_rad().abs() <= 8.0_f32.to_radians()
+            && self.altitude.abs() <= 0.65
+            && self.lateral_offset.abs() <= 0.55
+    }
+
+    fn status(&self) -> &'static str {
+        match self.phase {
+            GamePhase::Docked => "DOCKING COMPLETE",
+            GamePhase::Collision => "HULL CONTACT / ABORT",
+            GamePhase::Active if self.approach_enabled && self.can_approach() => "FINAL APPROACH",
+            GamePhase::Active if self.approach_enabled => "HOLD / ALIGNMENT REQUIRED",
+            GamePhase::Active if self.hard_lock() => "TARGET LOCKED",
+            GamePhase::Active => "TARGET UNLOCKED",
+        }
+    }
+
+    fn orbital_mean_motion(&self) -> f64 {
+        (EARTH_MU / ORBIT_RADIUS_M.powi(3)).sqrt()
+    }
+
+    fn orbital_speed_km_s(&self) -> f64 {
+        (EARTH_MU / ORBIT_RADIUS_M).sqrt() / 1000.0
+    }
+
+    fn orbital_period_min(&self) -> f64 {
+        TAU as f64 / self.orbital_mean_motion() / 60.0
+    }
+}
+
+#[derive(Clone, Copy, Default)]
+struct InputState {
+    left: bool,
+    right: bool,
+    up: bool,
+    down: bool,
+    approach: bool,
+    reset: bool,
+    camera: bool,
+}
+
+fn update_simulation(game: &mut GameState, input: InputState, dt: f32) {
+    if input.reset {
+        *game = GameState::default();
+        return;
+    }
+    if input.camera {
+        game.camera_mode = match game.camera_mode {
+            CameraMode::Automatic => CameraMode::Wide,
+            CameraMode::Wide => CameraMode::Chase,
+            CameraMode::Chase => CameraMode::Docking,
+            CameraMode::Docking => CameraMode::Automatic,
+        };
+    }
+    if input.approach && game.phase == GamePhase::Active {
+        game.approach_enabled = !game.approach_enabled;
+    }
+
+    let dt64 = dt as f64;
+    let mean_motion = game.orbital_mean_motion();
+    game.orbit_angle = (game.orbit_angle + mean_motion * dt64).rem_euclid(TAU as f64);
+    game.elapsed += dt;
+    game.endurance_angle = wrap_angle(
+        game.endurance_angle + ENDURANCE_RPM * TAU / 60.0 * dt,
+    );
+
+    if game.phase == GamePhase::Docked {
+        game.lander_rpm = ENDURANCE_RPM;
+        game.lander_angle = wrap_angle(game.lander_angle + ENDURANCE_RPM * TAU / 60.0 * dt);
+        game.altitude = 0.0;
+        game.distance = 0.0;
+        game.relative_x_speed = 0.0;
+        return;
+    }
+    if game.phase == GamePhase::Collision {
+        game.approach_enabled = false;
+        return;
+    }
+
+    // Giro angular con inercia: A/Izquierda acelera hacia -68 RPM.
+    let spin_input = (input.right as i32 - input.left as i32) as f32;
+    game.lander_rpm = (game.lander_rpm + spin_input * ROTATION_ACCEL_RPM_S * dt)
+        .clamp(-MAX_LANDER_RPM, MAX_LANDER_RPM);
+    game.lander_angle = wrap_angle(game.lander_angle + game.lander_rpm * TAU / 60.0 * dt);
+
+    // Dinámica orbital relativa (ecuaciones de Hill-Clohessy-Wiltshire).
+    // x: eje radial de aproximación; y: desviación vertical; z: fuera del plano.
+    let n = mean_motion as f32;
+    let x_from_station_center = game.distance + 10.8;
+    let orbital_ax = 3.0 * n * n * x_from_station_center + 2.0 * n * game.vertical_speed;
+    let orbital_ay = -2.0 * n * game.relative_x_speed;
+    let orbital_az = -n * n * game.lateral_offset;
+
+    let vertical_input = (input.up as i32 - input.down as i32) as f32;
+    let vertical_thruster = vertical_input * 3.2;
+    let vertical_damping = -1.15 * game.vertical_speed - 0.65 * game.altitude;
+    let lateral_damping = -1.25 * game.lateral_speed - 0.7 * game.lateral_offset;
+    game.vertical_speed += (vertical_thruster + vertical_damping + orbital_ay) * dt;
+    game.altitude += game.vertical_speed * dt;
+    game.lateral_speed += (lateral_damping + orbital_az) * dt;
+    game.lateral_offset += game.lateral_speed * dt;
+    game.altitude = game.altitude.clamp(-5.0, 5.0);
+    game.lateral_offset = game.lateral_offset.clamp(-4.0, 4.0);
+
+    // Control PD de velocidad de cierre. Se inhibe si no hay un bloqueo seguro.
+    let target_closing_speed = if game.approach_enabled && game.can_approach() {
+        -APPROACH_SPEED
+    } else {
+        0.0
+    };
+    let approach_accel = (target_closing_speed - game.relative_x_speed) * 1.8;
+    let x_accel = orbital_ax + approach_accel;
+    game.relative_x_speed += x_accel * dt;
+    game.relative_x_speed = game.relative_x_speed.clamp(-1.0, 0.8);
+    game.distance += game.relative_x_speed * dt;
+
+    // Volumen de colisión del aro frontal y del cuello de acoplamiento.
+    if game.distance < 1.35
+        && (game.altitude.abs() > 0.95 || game.lateral_offset.abs() > 0.85)
+    {
+        game.phase = GamePhase::Collision;
+        game.approach_enabled = false;
+    } else if game.distance <= 0.035 {
+        game.distance = 0.0;
+        game.approach_enabled = false;
+        if game.hard_lock() && game.relative_x_speed.abs() <= 0.9 {
+            game.phase = GamePhase::Docked;
+            game.lander_rpm = ENDURANCE_RPM;
+            game.vertical_speed = 0.0;
+            game.relative_x_speed = 0.0;
+        } else {
+            game.phase = GamePhase::Collision;
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct Camera {
+    position: Vec3,
+    target: Vec3,
+    fov_y: f32,
+    near: f32,
+}
+
+impl Default for Camera {
+    fn default() -> Self {
+        Self {
+            position: Vec3::new(-72.0, 16.0, 29.0),
+            target: Vec3::new(-5.0, 0.0, 0.0),
+            fov_y: 48.0_f32.to_radians(),
+            near: 0.08,
+        }
+    }
+}
+
+impl Camera {
+    fn basis(&self) -> (Vec3, Vec3, Vec3) {
+        let forward = (self.target - self.position).normalize_or_zero();
+        let right = forward.cross(Vec3::Y).normalize_or_zero();
+        let up = right.cross(forward).normalize_or_zero();
+        (forward, right, up)
+    }
+
+    fn project(&self, point: Vec3, width: usize, height: usize) -> Option<ScreenVertex> {
+        let (forward, right, up) = self.basis();
+        let relative = point - self.position;
+        let z = relative.dot(forward);
+        if z <= self.near || !z.is_finite() {
+            return None;
+        }
+        let focal = (height as f32 * 0.5) / (self.fov_y * 0.5).tan();
+        Some(ScreenVertex {
+            x: width as f32 * 0.5 + relative.dot(right) * focal / z,
+            y: height as f32 * 0.5 - relative.dot(up) * focal / z,
+            z,
+        })
+    }
+}
+
+#[derive(Clone, Copy)]
+struct ScreenVertex {
+    x: f32,
+    y: f32,
+    z: f32,
+}
+
+fn update_camera(camera: &mut Camera, game: &GameState, dt: f32) {
+    let lander = game.lander_position();
+    let port = Vec3::new(TARGET_PORT_X, 0.0, 0.0);
+    let (desired_position, look_target) = match game.camera_mode {
+        CameraMode::Wide => (Vec3::new(-72.0, 16.0, 29.0), Vec3::new(-5.0, 0.0, 0.0)),
+        CameraMode::Chase => (lander + Vec3::new(-13.0, 7.5, 16.0), port),
+        CameraMode::Docking => (lander + Vec3::new(-5.0, 2.1, 7.0), port),
+        CameraMode::Automatic if game.distance > 12.0 => {
+            (Vec3::new(-72.0, 16.0, 29.0), Vec3::new(-5.0, 0.0, 0.0))
+        }
+        CameraMode::Automatic if game.distance > 4.0 => {
+            (lander + Vec3::new(-13.0, 7.5, 16.0), port)
+        }
+        CameraMode::Automatic => (lander + Vec3::new(-5.0, 2.1, 7.0), port),
+    };
+    let blend = 1.0 - (-3.2 * dt).exp();
+    camera.position = camera.position.lerp(desired_position, blend);
+    camera.target = camera.target.lerp(look_target, blend);
+}
+
+struct Framebuffer {
+    width: usize,
+    height: usize,
+    color: Vec<u32>,
+    depth: Vec<f32>,
+}
+
+impl Framebuffer {
+    fn new(width: usize, height: usize) -> Self {
+        Self {
+            width,
+            height,
+            color: vec![0; width * height],
+            depth: vec![f32::INFINITY; width * height],
+        }
+    }
+
+    fn clear(&mut self, color: u32) {
+        self.color.fill(color);
+        self.depth.fill(f32::INFINITY);
+    }
+
+    fn pixel(&mut self, x: i32, y: i32, color: u32) {
+        if x >= 0 && y >= 0 && (x as usize) < self.width && (y as usize) < self.height {
+            let index = y as usize * self.width + x as usize;
+            self.color[index] = color;
+        }
+    }
+
+    fn fill_rect(&mut self, x: i32, y: i32, width: i32, height: i32, color: u32) {
+        let x0 = x.max(0);
+        let y0 = y.max(0);
+        let x1 = (x + width).min(self.width as i32);
+        let y1 = (y + height).min(self.height as i32);
+        for py in y0..y1 {
+            let start = py as usize * self.width + x0 as usize;
+            let end = py as usize * self.width + x1 as usize;
+            self.color[start..end].fill(color);
+        }
+    }
+
+    fn rect(&mut self, x: i32, y: i32, width: i32, height: i32, color: u32) {
+        self.line(x, y, x + width, y, color);
+        self.line(x, y + height, x + width, y + height, color);
+        self.line(x, y, x, y + height, color);
+        self.line(x + width, y, x + width, y + height, color);
+    }
+
+    fn line(&mut self, mut x0: i32, mut y0: i32, x1: i32, y1: i32, color: u32) {
+        let dx = (x1 - x0).abs();
+        let sx = if x0 < x1 { 1 } else { -1 };
+        let dy = -(y1 - y0).abs();
+        let sy = if y0 < y1 { 1 } else { -1 };
+        let mut error = dx + dy;
+        loop {
+            self.pixel(x0, y0, color);
+            if x0 == x1 && y0 == y1 {
+                break;
+            }
+            let e2 = 2 * error;
+            if e2 >= dy {
+                error += dy;
+                x0 += sx;
+            }
+            if e2 <= dx {
+                error += dx;
+                y0 += sy;
+            }
+        }
+    }
+
+    fn circle(&mut self, cx: i32, cy: i32, radius: i32, color: u32) {
+        let mut previous = None;
+        for i in 0..=96 {
+            let a = i as f32 / 96.0 * TAU;
+            let p = (
+                cx + (a.cos() * radius as f32) as i32,
+                cy + (a.sin() * radius as f32) as i32,
+            );
+            if let Some(last) = previous {
+                self.line(last.0, last.1, p.0, p.1, color);
+            }
+            previous = Some(p);
+        }
+    }
+
+    fn text(&mut self, x: i32, y: i32, value: &str, color: u32, scale: i32) {
+        let mut cursor_x = x;
+        let mut cursor_y = y;
+        for ch in value.chars() {
+            if ch == '\n' {
+                cursor_x = x;
+                cursor_y += 9 * scale;
+                continue;
+            }
+            let rows = glyph(ch.to_ascii_uppercase());
+            for (row_index, row) in rows.iter().enumerate() {
+                for col in 0..5 {
+                    if *row & (1 << (4 - col)) != 0 {
+                        self.fill_rect(
+                            cursor_x + col * scale,
+                            cursor_y + row_index as i32 * scale,
+                            scale,
+                            scale,
+                            color,
+                        );
+                    }
+                }
+            }
+            cursor_x += 6 * scale;
+        }
+    }
+
+    fn raster_triangle(
+        &mut self,
+        a: ScreenVertex,
+        b: ScreenVertex,
+        c: ScreenVertex,
+        ca: Vec3,
+        cb: Vec3,
+        cc: Vec3,
+    ) {
+        let min_x = a.x.min(b.x).min(c.x).floor().max(0.0) as i32;
+        let max_x = a.x.max(b.x).max(c.x).ceil().min(self.width as f32 - 1.0) as i32;
+        let min_y = a.y.min(b.y).min(c.y).floor().max(0.0) as i32;
+        let max_y = a.y.max(b.y).max(c.y).ceil().min(self.height as f32 - 1.0) as i32;
+        if min_x > max_x || min_y > max_y {
+            return;
+        }
+        let area = edge(a.x, a.y, b.x, b.y, c.x, c.y);
+        if area.abs() < 0.0001 {
+            return;
+        }
+        for y in min_y..=max_y {
+            for x in min_x..=max_x {
+                let px = x as f32 + 0.5;
+                let py = y as f32 + 0.5;
+                let w0 = edge(b.x, b.y, c.x, c.y, px, py) / area;
+                let w1 = edge(c.x, c.y, a.x, a.y, px, py) / area;
+                let w2 = 1.0 - w0 - w1;
+                if w0 < 0.0 || w1 < 0.0 || w2 < 0.0 {
+                    continue;
+                }
+                // Interpolación de profundidad perspectiva-correcta.
+                let inv_z = w0 / a.z + w1 / b.z + w2 / c.z;
+                if inv_z <= 0.0 {
+                    continue;
+                }
+                let z = 1.0 / inv_z;
+                let index = y as usize * self.width + x as usize;
+                if z >= self.depth[index] {
+                    continue;
+                }
+                let p0 = (w0 / a.z) / inv_z;
+                let p1 = (w1 / b.z) / inv_z;
+                let p2 = (w2 / c.z) / inv_z;
+                let color = ca * p0 + cb * p1 + cc * p2;
+                self.color[index] = pack_rgb(color);
+                self.depth[index] = z;
+            }
+        }
+    }
+}
+
+fn edge(ax: f32, ay: f32, bx: f32, by: f32, px: f32, py: f32) -> f32 {
+    (px - ax) * (by - ay) - (py - ay) * (bx - ax)
+}
+
+fn pack_rgb(color: Vec3) -> u32 {
+    let c = color.clamp(Vec3::ZERO, Vec3::ONE) * 255.0;
+    ((c.x as u32) << 16) | ((c.y as u32) << 8) | c.z as u32
+}
+
+fn shade(base: Vec3, normal: Vec3, position: Vec3, camera: &Camera) -> Vec3 {
+    let n = normal.normalize_or_zero();
+    let sun_dir = Vec3::new(-0.42, 0.74, 0.52).normalize();
+    let point_light = Vec3::new(-18.0, 20.0, 28.0);
+    let point_dir = (point_light - position).normalize_or_zero();
+    let point_distance = point_light.distance_squared(position);
+    let view_dir = (camera.position - position).normalize_or_zero();
+    let half_vec = (sun_dir + view_dir).normalize_or_zero();
+    let diffuse_sun = n.dot(sun_dir).max(0.0);
+    let diffuse_point = n.dot(point_dir).max(0.0) * (1.0 / (1.0 + point_distance * 0.0015));
+    let specular = n.dot(half_vec).max(0.0).powf(22.0) * 0.20;
+    let light = 0.19 + diffuse_sun * 0.62 + diffuse_point * 0.72 + specular;
+    (base * light + Vec3::new(0.008, 0.018, 0.028)).clamp(Vec3::ZERO, Vec3::ONE)
+}
+
+fn render_model(
+    framebuffer: &mut Framebuffer,
+    camera: &Camera,
+    model: &CpuModel,
+    transform: Mat4,
+) {
+    for triangle in &model.triangles {
+        let pa = transform.transform_point3(triangle.a.position);
+        let pb = transform.transform_point3(triangle.b.position);
+        let pc = transform.transform_point3(triangle.c.position);
+        let center = (pa + pb + pc) / 3.0;
+        let geometric_normal = (pb - pa).cross(pc - pa).normalize_or_zero();
+        if geometric_normal.dot(camera.position - center) <= 0.0 {
+            continue;
+        }
+        let Some(sa) = camera.project(pa, framebuffer.width, framebuffer.height) else { continue; };
+        let Some(sb) = camera.project(pb, framebuffer.width, framebuffer.height) else { continue; };
+        let Some(sc) = camera.project(pc, framebuffer.width, framebuffer.height) else { continue; };
+        if sa.x.max(sb.x).max(sc.x) < 0.0
+            || sa.y.max(sb.y).max(sc.y) < 0.0
+            || sa.x.min(sb.x).min(sc.x) >= framebuffer.width as f32
+            || sa.y.min(sb.y).min(sc.y) >= framebuffer.height as f32
+        {
+            continue;
+        }
+        let na = transform.transform_vector3(triangle.a.normal).normalize_or_zero();
+        let nb = transform.transform_vector3(triangle.b.normal).normalize_or_zero();
+        let nc = transform.transform_vector3(triangle.c.normal).normalize_or_zero();
+        let ca = shade(triangle.color, na, pa, camera);
+        let cb = shade(triangle.color, nb, pb, camera);
+        let cc = shade(triangle.color, nc, pc, camera);
+        framebuffer.raster_triangle(sa, sb, sc, ca, cb, cc);
+    }
+}
+
+fn render_scene(
+    framebuffer: &mut Framebuffer,
+    camera: &Camera,
+    game: &GameState,
+    endurance: &CpuModel,
+    lander: &CpuModel,
+) {
+    let endurance_transform = Mat4::from_rotation_x(game.endurance_angle);
+    let lander_rotation = Quat::from_rotation_x(game.lander_angle) * Quat::from_rotation_y(FRAC_PI_2);
+    let lander_transform = Mat4::from_scale_rotation_translation(
+        Vec3::splat(LANDER_SCALE),
+        lander_rotation,
+        game.lander_position(),
+    );
+    render_model(framebuffer, camera, endurance, endurance_transform);
+    render_model(framebuffer, camera, lander, lander_transform);
+
+    // Retícula de aproximación dibujada también por software.
+    let port = Vec3::new(TARGET_PORT_X, 0.0, 0.0);
+    for i in -2..=2 {
+        let offset = i as f32 * 0.55;
+        draw_world_line(framebuffer, camera, port + Vec3::new(0.0, -1.6, offset), port + Vec3::new(0.0, 1.6, offset), 0x1A647D);
+        draw_world_line(framebuffer, camera, port + Vec3::new(0.0, offset, -1.6), port + Vec3::new(0.0, offset, 1.6), 0x1A647D);
+    }
+    draw_world_line(framebuffer, camera, port + Vec3::new(-2.0, 0.0, 0.0), port + Vec3::new(2.0, 0.0, 0.0), 0x39BDE4);
+    draw_world_line(framebuffer, camera, port + Vec3::new(0.0, -2.0, 0.0), port + Vec3::new(0.0, 2.0, 0.0), 0x39BDE4);
+}
+
+fn draw_world_line(framebuffer: &mut Framebuffer, camera: &Camera, a: Vec3, b: Vec3, color: u32) {
+    if let (Some(pa), Some(pb)) = (
+        camera.project(a, framebuffer.width, framebuffer.height),
+        camera.project(b, framebuffer.width, framebuffer.height),
+    ) {
+        framebuffer.line(pa.x as i32, pa.y as i32, pb.x as i32, pb.y as i32, color);
+    }
+}
+
+fn make_starfield() -> Vec<Vec3> {
+    let mut stars = Vec::with_capacity(720);
+    let golden_angle = 2.399_963_1_f32;
+    for i in 0..720 {
+        let fi = i as f32;
+        let y = 1.0 - 2.0 * ((fi + 0.5) / 720.0);
+        let radius = (1.0 - y * y).sqrt();
+        let theta = golden_angle * fi;
+        let direction = Vec3::new(radius * theta.cos(), y, radius * theta.sin());
+        let shell = 115.0 + ((i * 37) % 95) as f32;
+        stars.push(direction * shell);
+    }
+    stars
+}
+
+fn render_starfield(framebuffer: &mut Framebuffer, camera: &Camera, stars: &[Vec3]) {
+    for (i, star) in stars.iter().enumerate() {
+        if let Some(p) = camera.project(*star, framebuffer.width, framebuffer.height) {
+            let brightness = 105 + ((i * 19) % 145) as u32;
+            let color = (brightness << 16) | (brightness << 8) | (brightness + 8).min(255);
+            framebuffer.pixel(p.x as i32, p.y as i32, color);
+            if i % 17 == 0 {
+                framebuffer.pixel(p.x as i32 + 1, p.y as i32, color);
+            }
+        }
+    }
+}
+
+fn render_hud(framebuffer: &mut Framebuffer, game: &GameState, fps: f32) {
+    const CYAN: u32 = 0x56D6F4;
+    const TEXT: u32 = 0xC5D7E0;
+    const MUTED: u32 = 0x718D9A;
+    const ORANGE: u32 = 0xFFAA62;
+    const PANEL: u32 = 0x071522;
+    let w = framebuffer.width as i32;
+    let h = framebuffer.height as i32;
+
+    framebuffer.fill_rect(18, 18, 300, 66, PANEL);
+    framebuffer.rect(18, 18, 300, 66, 0x28556B);
+    framebuffer.text(30, 28, "INTERSTELLAR // DOCK-01", CYAN, 2);
+    framebuffer.text(30, 54, "CPU SOFTWARE RENDERER", MUTED, 1);
+    framebuffer.text(30, 94, "A / LEFT  SPIN LEFT     D / RIGHT  SPIN RIGHT", TEXT, 1);
+    framebuffer.text(30, 109, "W / UP RAISE   S / DOWN LOWER   E APPROACH", TEXT, 1);
+    framebuffer.text(30, 124, "C CAMERA MODE     R RESET     ESC EXIT", TEXT, 1);
+
+    let panel_x = w - 374;
+    framebuffer.fill_rect(panel_x, 18, 356, 334, PANEL);
+    framebuffer.rect(panel_x, 18, 356, 334, 0x32647B);
+    framebuffer.text(panel_x + 15, 31, "FLIGHT TELEMETRY // REAL TIME", CYAN, 1);
+    framebuffer.line(panel_x + 12, 48, w - 30, 48, 0x244D61);
+    let orbit_km = ORBIT_ALTITUDE_M / 1000.0;
+    let lines = [
+        format!("ENDURANCE  {:+06.1} RPM  LEFT", ENDURANCE_RPM),
+        format!("LANDER     {:+06.1} RPM", game.lander_rpm),
+        format!("SPIN ERROR  {:05.1} RPM", game.rpm_error()),
+        format!("ALIGNMENT   {:05.1} %", game.alignment_percent()),
+        format!("PHASE ERR  {:+06.1} DEG", game.phase_error_rad().to_degrees()),
+        format!("ALTITUDE   {:+06.2} M", game.altitude),
+        format!("LATERAL    {:+06.2} M", game.lateral_offset),
+        format!("DISTANCE    {:06.2} M", game.distance),
+        format!("CLOSE RATE  {:+05.2} M/S", game.relative_x_speed),
+        format!("VERT RATE   {:+05.2} M/S", game.vertical_speed),
+        format!("ORBIT ALT   {:04.0} KM", orbit_km),
+        format!("ORBIT SPEED {:04.2} KM/S", game.orbital_speed_km_s()),
+        format!("ORBIT PERIOD {:04.1} MIN", game.orbital_period_min()),
+        format!("GRAVITY {:04.2} M/S2  ORBIT {:03.0} DEG", game.gravity_m_s2, game.orbit_angle.to_degrees()),
+    ];
+    for (i, line) in lines.iter().enumerate() {
+        let y = 58 + i as i32 * 18;
+        let color = if i == 3 {
+            if game.alignment_percent() >= 84.0 { 0x71E6AE } else { ORANGE }
+        } else if i == 0 || i == 1 { CYAN } else { TEXT };
+        framebuffer.text(panel_x + 15, y, line, color, 1);
+    }
+    framebuffer.line(panel_x + 12, 316, w - 30, 316, 0x244D61);
+    let camera_name = match game.camera_mode {
+        CameraMode::Automatic => "AUTO",
+        CameraMode::Wide => "EXTERIOR",
+        CameraMode::Chase => "FOLLOW",
+        CameraMode::Docking => "DOCKING PORT",
+    };
+    framebuffer.text(panel_x + 15, 328, &format!("{}  //  FPS {:04.1}", camera_name, fps), MUTED, 1);
+
+    // Monitor de docking: el movimiento se comprime de 68 a 15 RPM,
+    // pero el porcentaje usa exactamente la alineación real del juego.
+    let mx = 20;
+    let my = h - 218;
+    framebuffer.fill_rect(mx, my, 432, 198, PANEL);
+    framebuffer.rect(mx, my, 432, 198, 0x32647B);
+    framebuffer.text(mx + 13, my + 12, "DOCKING CAMERA // MONITOR SCALE 15 RPM", CYAN, 1);
+    framebuffer.line(mx + 10, my + 30, mx + 420, my + 30, 0x244D61);
+    let cx = mx + 108;
+    let cy = my + 112;
+    framebuffer.circle(cx, cy, 69, 0x2C8DA8);
+    framebuffer.circle(cx, cy, 52, 0x1B536A);
+    for tick in 0..24 {
+        let angle = tick as f32 / 24.0 * TAU;
+        let r1 = if tick % 3 == 0 { 61.0 } else { 65.0 };
+        let r2 = 69.0;
+        framebuffer.line(
+            cx + (angle.cos() * r1) as i32,
+            cy + (angle.sin() * r1) as i32,
+            cx + (angle.cos() * r2) as i32,
+            cy + (angle.sin() * r2) as i32,
+            0x5ACBE6,
+        );
+    }
+    let monitor_target_angle = game.elapsed * MONITOR_RPM * TAU / 60.0;
+    let monitor_lander_angle = monitor_target_angle + game.phase_error_rad() * (15.0 / 68.0);
+    draw_dial_needle(framebuffer, cx, cy, 60, monitor_target_angle, CYAN, 3);
+    draw_dial_needle(framebuffer, cx, cy, 45, monitor_lander_angle, ORANGE, 3);
+    framebuffer.circle(cx, cy, 5, TEXT);
+
+    let tx = mx + 210;
+    let scaled_lander = game.lander_rpm * (15.0 / 68.0);
+    let scaled_phase = game.phase_error_rad().to_degrees() * (15.0 / 68.0);
+    let monitor_lines = [
+        format!("TARGET   {:+05.1} RPM", MONITOR_RPM),
+        format!("LANDER   {:+05.1} RPM", scaled_lander),
+        format!("ROLL ERR  {:04.1} RPM", (scaled_lander - MONITOR_RPM).abs()),
+        format!("PHASE    {:+05.1} DEG", scaled_phase),
+        format!("ALIGN     {:05.1} %", game.alignment_percent()),
+    ];
+    for (i, line) in monitor_lines.iter().enumerate() {
+        framebuffer.text(tx, my + 54 + i as i32 * 20, line, if i == 1 { ORANGE } else { TEXT }, 1);
+    }
+    framebuffer.fill_rect(tx, my + 158, 195, 9, 0x122B39);
+    let bar_width = (195.0 * game.alignment_percent() / 100.0) as i32;
+    framebuffer.fill_rect(tx, my + 158, bar_width, 9, if game.alignment_percent() >= 84.0 { 0x55D49D } else { 0xE8A15F });
+
+    let status_color = match game.phase {
+        GamePhase::Docked => 0x66E3A5,
+        GamePhase::Collision => 0xFF6565,
+        GamePhase::Active if game.can_approach() => 0x66E3A5,
+        _ => ORANGE,
+    };
+    framebuffer.fill_rect(w - 382, h - 48, 364, 30, PANEL);
+    framebuffer.rect(w - 382, h - 48, 364, 30, status_color);
+    framebuffer.text(w - 370, h - 39, game.status(), status_color, 1);
+}
+
+fn draw_dial_needle(framebuffer: &mut Framebuffer, cx: i32, cy: i32, radius: i32, angle: f32, color: u32, thickness: i32) {
+    let x = cx + (angle.cos() * radius as f32) as i32;
+    let y = cy + (angle.sin() * radius as f32) as i32;
+    framebuffer.line(cx, cy, x, y, color);
+    for dx in -thickness..=thickness {
+        for dy in -thickness..=thickness {
+            if dx * dx + dy * dy <= thickness * thickness {
+                framebuffer.pixel(x + dx, y + dy, color);
+            }
+        }
+    }
+}
+
+fn glyph(ch: char) -> [u8; 7] {
+    match ch {
+        'A' => [14,17,17,31,17,17,17], 'B' => [30,17,17,30,17,17,30],
+        'C' => [14,17,16,16,16,17,14], 'D' => [30,17,17,17,17,17,30],
+        'E' => [31,16,16,30,16,16,31], 'F' => [31,16,16,30,16,16,16],
+        'G' => [14,17,16,23,17,17,15], 'H' => [17,17,17,31,17,17,17],
+        'I' => [14,4,4,4,4,4,14], 'J' => [7,2,2,2,18,18,12],
+        'K' => [17,18,20,24,20,18,17], 'L' => [16,16,16,16,16,16,31],
+        'M' => [17,27,21,21,17,17,17], 'N' => [17,25,21,19,17,17,17],
+        'O' => [14,17,17,17,17,17,14], 'P' => [30,17,17,30,16,16,16],
+        'Q' => [14,17,17,17,21,18,13], 'R' => [30,17,17,30,20,18,17],
+        'S' => [15,16,16,14,1,1,30], 'T' => [31,4,4,4,4,4,4],
+        'U' => [17,17,17,17,17,17,14], 'V' => [17,17,17,17,17,10,4],
+        'W' => [17,17,17,21,21,21,10], 'X' => [17,17,10,4,10,17,17],
+        'Y' => [17,17,10,4,4,4,4], 'Z' => [31,1,2,4,8,16,31],
+        '0' => [14,17,19,21,25,17,14], '1' => [4,12,4,4,4,4,14],
+        '2' => [14,17,1,2,4,8,31], '3' => [30,1,1,14,1,1,30],
+        '4' => [2,6,10,18,31,2,2], '5' => [31,16,16,30,1,1,30],
+        '6' => [14,16,16,30,17,17,14], '7' => [31,1,2,4,8,8,8],
+        '8' => [14,17,17,14,17,17,14], '9' => [14,17,17,15,1,1,14],
+        '-' => [0,0,0,31,0,0,0], '+' => [0,4,4,31,4,4,0],
+        '.' => [0,0,0,0,0,12,12], ':' => [0,12,12,0,12,12,0],
+        '/' => [1,2,2,4,8,8,16], '%' => [17,2,4,8,17,0,0],
+        '>' => [16,8,4,2,4,8,16], '<' => [1,2,4,8,4,2,1],
+        '|' => [4,4,4,4,4,4,4], '_' => [0,0,0,0,0,0,31],
+        '=' => [0,31,0,31,0,0,0], '#' => [10,31,10,10,31,10,0],
+        '[' => [14,8,8,8,8,8,14], ']' => [14,2,2,2,2,2,14],
+        ' ' => [0; 7], _ => [0; 7],
+    }
+}
+
+fn wrap_angle(angle: f32) -> f32 {
+    (angle + PI).rem_euclid(TAU) - PI
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn endurance_rotates_at_exactly_sixty_eight_rpm_left() {
+        assert_eq!(ENDURANCE_RPM, -68.0);
+        assert!((ENDURANCE_RPM * TAU / 60.0 + 7.1209433).abs() < 0.0001);
+    }
+
+    #[test]
+    fn monitor_maps_sixty_eight_to_fifteen_rpm() {
+        let mapped = 68.0 * (15.0 / 68.0);
+        assert!((mapped - 15.0).abs() < 0.0001);
+    }
+
+    #[test]
+    fn orbital_speed_and_period_are_physically_plausible() {
+        let game = GameState::default();
+        assert!((game.orbital_speed_km_s() - 7.6).abs() < 0.2);
+        assert!((game.orbital_period_min() - 95.0).abs() < 2.0);
+        assert!(game.gravity_m_s2 > 7.0 && game.gravity_m_s2 < 10.0);
+    }
+
+    #[test]
+    fn a_perfect_lock_produces_full_alignment() {
+        let mut game = GameState::default();
+        game.lander_rpm = ENDURANCE_RPM;
+        game.lander_angle = game.endurance_angle;
+        game.altitude = 0.0;
+        game.lateral_offset = 0.0;
+        assert!(game.hard_lock());
+        assert!((game.alignment_percent() - 100.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn phase_wrap_stays_between_minus_pi_and_pi() {
+        let value = wrap_angle(9.0 * TAU + 0.25);
+        assert!((value - 0.25).abs() < 0.001);
+        assert!(wrap_angle(8.0).abs() <= PI);
+    }
+
+    #[test]
+    fn framebuffer_uses_memory_color_and_depth_buffers() {
+        let fb = Framebuffer::new(32, 16);
+        assert_eq!(fb.color.len(), 512);
+        assert_eq!(fb.depth.len(), 512);
+    }
+}
+
+========================================================================
+FIN DEL ARCHIVO: src/main.rs
+========================================================================
+
+========================================================================
+INICIO DEL ARCHIVO: README.md
+========================================================================
+
+# INTERSTELLAR // Docking CPU Edition
+
+Minijuego 3D de acoplamiento orbital reescrito para **renderizado por software en CPU**. Esta edición elimina Bevy y su pipeline 3D: la geometría de los GLB se carga una vez, se transforma/proyecta en CPU y se rasteriza a un framebuffer de memoria con búfer de profundidad.
+
+## Arquitectura CPU-only
+
+- **Geometría:** importación de los modelos GLB mediante `gltf`; se extraen posiciones, normales, índices y factores de material. Las transformaciones jerárquicas de nodos se hornean en la geometría local.
+- **Movimiento orbital:** propagación de la órbita circular de la estación a partir de `mu` terrestre y radio orbital. Se calculan velocidad orbital, movimiento medio, periodo y gravedad local.
+- **Física relativa:** ecuaciones linealizadas de Hill-Clohessy-Wiltshire para el movimiento relativo alrededor de la estación; control de giro con inercia, propulsores verticales amortiguados y controlador PD de aproximación.
+- **Colisiones:** volumen de contacto del puerto, límites laterales/verticales y comprobación de bloqueo angular y de velocidad antes de confirmar el acoplamiento.
+- **Iluminación:** Lambert difuso, luz direccional, luz puntual con atenuación y un término especular sencillo, todos calculados por CPU a partir de normales.
+- **Rasterizador:** proyección perspectiva, descarte de caras posteriores, rasterización de triángulos por coordenadas baricéntricas, interpolación perspectiva-correcta de profundidad/color, y dibujo de líneas/píxeles.
+- **Framebuffer:** `Vec<u32>` en RAM, 1280×720, acompañado por un `Vec<f32>` para profundidad. El resultado se presenta con `minifb::update_with_buffer`.
+- **HUD:** panel de telemetría superior derecho, monitor circular inferior izquierdo con escala de 15 RPM y retícula de aproximación, dibujados también en CPU.
+
+No se usa Bevy, wgpu, Vulkan, Direct3D, OpenGL ni shaders para renderizar la escena. `minifb` solo presenta el búfer de píxeles y su preferencia de aceleración está desactivada (`UseGPU::Disabled`). En Windows, minifb presenta el búfer por GDI; el compositor gráfico del sistema operativo sigue siendo responsabilidad de Windows.
+
+> Los modelos conservan la geometría 3D del GLB, pero esta primera versión software no decodifica mapas de textura PBR. El color se obtiene del factor base del material y se ilumina en CPU; los materiales de vidrio reciben un tinte cian opaco simulado.
+
+## Requisitos
+
+- Rust estable 1.85 o posterior (edition 2024).
+- Windows 10/11 recomendado para el equipo de referencia.
+- No necesita una tarjeta gráfica dedicada ni un runtime de GPU para el renderizador.
+
+## Ejecutar en Windows
+
+Abre PowerShell o CMD en esta carpeta y ejecuta:
+
+```powershell
+cargo run --release
+```
+
+También puedes hacer doble clic en `run_cpu.bat`.
+
+Pruebas unitarias:
+
+```powershell
+cargo test
+```
+
+La primera compilación descarga `glam`, `gltf` y `minifb` desde crates.io. Los modelos ya se encuentran en `assets/models`; ejecuta Cargo desde la raíz del proyecto para que se resuelvan las rutas relativas.
+
+## Controles
+
+| Tecla | Acción |
+|---|---|
+| A / ← | Acelerar giro del Lander hacia la izquierda |
+| D / → | Corregir giro hacia la derecha |
+| W / ↑ | Subir |
+| S / ↓ | Bajar |
+| E | Activar / pausar la aproximación final |
+| C | Cambiar cámara: automática, exterior, seguimiento, puerto |
+| R | Reiniciar maniobra |
+| Esc | Salir |
+
+## Parámetros principales
+
+- Endurance: **−68.0 RPM exactas** hacia la izquierda (−408 grados por segundo).
+- Monitor secundario: objetivo visual de **−15.0 RPM**; su ángulo y velocidad son una transformación 15/68 de la simulación principal. El porcentaje de alineación procede de la simulación real.
+- Órbita de referencia: 520 km de altitud sobre la Tierra.
+- Parámetro gravitacional terrestre: `3.986004418 × 10^14 m³/s²`.
+
+## Estructura
+
+```text
+Interstellar_Docking_CPU/
+├── Cargo.toml
+├── README.md
+├── run_cpu.bat
+├── src/
+│   └── main.rs
+├── assets/
+│   └── models/
+│       ├── endurance.glb
+│       └── lander.glb
+└── references/
+    └── docking_hud_reference.jpg
+```
+
+========================================================================
+FIN DEL ARCHIVO: README.md
+========================================================================
