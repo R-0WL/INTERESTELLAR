@@ -1,0 +1,38 @@
+AGUJERO NEGRO PREPARADO PARA RUST
+
+ABRIR EN BLENDER
+1. Abre blackhole_preparado.blend. Las tres texturas estan empaquetadas.
+2. La coleccion 01 contiene el disco de 22 capas. F12 muestra la vista previa.
+3. La coleccion 02 esta oculta: contiene un volumen de referencia reconstruido y el plano de captura con los nodos recuperados.
+4. La coleccion 03 contiene una esfera negra y una camara para previsualizar. No forman parte del OBJ.
+
+CAMBIOS REALIZADOS
+- Recuperacion del material procedural Material.006 y los otros materiales del archivo adjunto.
+- Captura de emision superficial en tres alturas del material: Z=0, +0.045 y +0.08. El volumen original tiene una escala Z de aproximadamente -0.09135; por eso no se usaron +0.15 y +0.30, que quedarian fuera del contenedor reconstruido.
+- Tres PNG RGBA de 1024x1024, con negro transparente y alpha derivado de la intensidad. Se normalizo el RGB por la intensidad; no son fotografias volumetricas ni conservan el rango HDR completo.
+- Veintidos planos con UV, 44 triangulos en total, distribuidos entre Z=-0.08 y +0.08. Las mismas tres texturas se reutilizan arriba y abajo como aproximacion simetrica.
+- OBJ, MTL y capas.json para facilitar la integracion.
+
+COMPATIBILIDAD
+El adjunto esta guardado en Blender 5.2. Este resultado se construyo y verifico en Blender 4.3.2 recuperando materiales; no es una conversion integra de la escena original. El volumen de referencia y la esfera de vista previa se reconstruyeron. La esfera tiene radio ilustrativo 0.65. No se modifico el archivo original. Se mantienen los materiales recuperados, pero no se garantiza paridad de nodos o de animaciones entre versiones. La copia es estatica.
+
+EN RUST
+- Carga disco_capas.obj y las tres texturas. Si tu cargador ignora MTL, usa capas.json para asignar textura y opacidad por objeto.
+- Blender usa Z como altura. Si tu mundo usa Y como altura, transforma (x,y,z) a (x,z,-y).
+- Mezcla aditiva recomendada: destino_rgb += textura_rgb_lineal * alpha * opacidad_capa * intensidad_global. Limita o aplica tone mapping al final. Convierte RGB de sRGB a lineal antes de sumar. El alpha no lleva correccion gamma.
+- Para mezcla aditiva conserva el test de profundidad contra geometria opaca y desactiva la escritura de profundidad del gas. Dibuja ambas caras. El OBJ no impone estos estados: debes programarlos en el rasterizador.
+- En muchos cargadores OBJ hay que invertir V al leer el PNG, porque el archivo de imagen comienza arriba.
+- MTL describe transparencia orientativa; el modo aditivo debe configurarse en tu codigo. Usa el canal alpha del PNG, no el RGB como mascara.
+- La esfera negra del render es solo una referencia. El OBJ exporta unicamente gas. El horizonte y la lente gravitacional quedan a cargo del postprocesado de Rust.
+
+LIMITES DE LA RECOMENDACION ANTERIOR
+Planos paralelos apilados son una aproximacion: exactamente de canto tienen area proyectada casi nula y pueden mostrar huecos. No dan volumen continuo desde todos los angulos. Para vuelos a ras del disco conviene evolucionar a planos cruzados o muestreo volumetrico adaptativo.
+El bake de emision sobre un plano captura un campo procedural local, no integra todo el volumen.
+Un postproceso 2D radial aproxima la distorsion del fondo; no reproduce por si solo toda la geometria optica relativista ni el aspecto de Interstellar. Su costo depende de los pixeles procesados; no hay garantia de tiempos o FPS.
+No se implemento codigo Rust porque no se adjunto el proyecto del renderizador.
+
+ACTUALIZACION: 22 capas y paleta blanco/naranja
+Las texturas fueron recoloreadas por intensidad: naranja en las vetas tenues, blanco calido en las mas intensas. Se conservaron alpha y detalles. Se redujo la opacidad por capa para compensar la mayor cantidad de planos. La escena de referencia oculta conserva los materiales anteriores.
+
+PALETA DORADA SEGUN REFERENCIA
+Transicion naranja-ambar-dorado-blanco calido; mayor emision y halo suave en el compositor de Blender. Las 22 capas se conservan. El halo es un efecto del render de Blender y no se exporta al OBJ. La referencia se uso para el color y brillo; no se anadio lente gravitacional ni el arco optico de la imagen.

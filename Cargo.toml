@@ -1,6 +1,6 @@
 [package]
 name = "interstellar_rust"
-version = "0.1.0"
+version = "0.5.0"
 edition = "2021"
 authors = ["Interstellar Rust adaptation"]
 description = "A small 3D space-flight game rendered with a custom software rasterizer"

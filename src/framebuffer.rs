@@ -10,6 +10,11 @@ pub struct Framebuffer {
     pub height: usize,
     pub color: Vec<u32>,
     pub depth: Vec<f32>,
+    /// Reusable source copy for screen-space post-processing.
+    pub postprocess_source: Vec<u32>,
+    /// Opaque mesh pixels are excluded when sampling the gravitational lens.
+    /// Stars and the transparent accretion gas intentionally remain sampleable.
+    pub lensing_excluded: Vec<u8>,
 }
 
 impl Framebuffer {
@@ -19,12 +24,15 @@ impl Framebuffer {
             height,
             color: vec![0; width * height],
             depth: vec![f32::INFINITY; width * height],
+            postprocess_source: vec![0; width * height],
+            lensing_excluded: vec![0; width * height],
         }
     }
 
     pub fn clear(&mut self, color: u32) {
         self.color.fill(color & 0x00FF_FFFF);
         self.depth.fill(f32::INFINITY);
+        self.lensing_excluded.fill(0);
     }
 
     pub fn clear_vertical_gradient(&mut self, top: u32, bottom: u32) {
@@ -45,6 +53,7 @@ impl Framebuffer {
             self.color[start..start + self.width].fill(color);
         }
         self.depth.fill(f32::INFINITY);
+        self.lensing_excluded.fill(0);
     }
 
     #[inline]
@@ -54,6 +63,52 @@ impl Framebuffer {
         }
         let index = y as usize * self.width + x as usize;
         self.color[index] = color & 0x00FF_FFFF;
+    }
+
+    /// Blend a screen-space effect pixel over the existing framebuffer color.
+    /// Alpha is an 8-bit opacity value: 0 is transparent and 255 is opaque.
+    #[inline]
+    pub fn blend_pixel(&mut self, x: i32, y: i32, color: u32, alpha: u8) {
+        if x < 0 || y < 0 || x >= self.width as i32 || y >= self.height as i32 || alpha == 0 {
+            return;
+        }
+        let index = y as usize * self.width + x as usize;
+        let destination = self.color[index];
+        let inverse = 255_u32 - alpha as u32;
+        let a = alpha as u32;
+        let blend = |shift: u32| {
+            let source_channel = (color >> shift) & 0xFF;
+            let destination_channel = (destination >> shift) & 0xFF;
+            (source_channel * a + destination_channel * inverse) / 255
+        };
+        self.color[index] = (blend(16) << 16) | (blend(8) << 8) | blend(0);
+    }
+
+    /// Alpha-blended Bresenham line, used for subtle motion streaks and warp effects.
+    pub fn draw_line_blended(&mut self, x0: i32, y0: i32, x1: i32, y1: i32, color: u32, alpha: u8) {
+        let mut x = x0;
+        let mut y = y0;
+        let dx = (x1 - x0).abs();
+        let sx = if x0 < x1 { 1 } else { -1 };
+        let dy = -(y1 - y0).abs();
+        let sy = if y0 < y1 { 1 } else { -1 };
+        let mut error = dx + dy;
+
+        loop {
+            self.blend_pixel(x, y, color, alpha);
+            if x == x1 && y == y1 {
+                break;
+            }
+            let twice_error = 2 * error;
+            if twice_error >= dy {
+                error += dy;
+                x += sx;
+            }
+            if twice_error <= dx {
+                error += dx;
+                y += sy;
+            }
+        }
     }
 
     /// Write a pixel only when it is closer than the value already in the Z-buffer.
@@ -189,6 +244,25 @@ pub fn color_from_f32(red: f32, green: f32, blue: f32) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn alpha_blend_respects_opacity() {
+        let mut fb = Framebuffer::new(1, 1);
+        fb.clear(0x000000);
+        fb.blend_pixel(0, 0, 0xFFFFFF, 128);
+        let color = fb.color[0];
+        assert!(((color >> 16) & 0xFF) >= 127 && ((color >> 16) & 0xFF) <= 128);
+        assert!(((color >> 8) & 0xFF) >= 127 && ((color >> 8) & 0xFF) <= 128);
+        assert!((color & 0xFF) >= 127 && (color & 0xFF) <= 128);
+    }
+
+    #[test]
+    fn blended_line_draws_without_overwriting_full_opacity() {
+        let mut fb = Framebuffer::new(4, 1);
+        fb.clear(0x000000);
+        fb.draw_line_blended(0, 0, 3, 0, 0xFFFFFF, 64);
+        assert!(fb.color.iter().all(|pixel| *pixel > 0 && *pixel < 0xFFFFFF));
+    }
 
     #[test]
     fn bmp_header_has_expected_signature() {

@@ -410,6 +410,23 @@ mod tests {
     }
 
     #[test]
+    fn imported_interstellar_models_can_be_loaded() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        for relative in [
+            "assets/models/objs/endurance_ranger_ranger.obj",
+            "assets/models/objs/ranger.obj",
+            "assets/models/objs/blackhole.obj",
+            "assets/models/objs/endurance_ranger.obj",
+            "assets/models/objs/asteroid.obj",
+        ] {
+            let path = root.join(relative);
+            let mesh = load_obj(&path).unwrap_or_else(|error| panic!("{relative}: {error}"));
+            assert!(!mesh.vertices.is_empty(), "{relative} has no vertices");
+            assert!(!mesh.triangles.is_empty(), "{relative} has no triangles");
+        }
+    }
+
+    #[test]
     fn supplied_obj_asset_can_be_loaded() {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("assets/models/esfera.obj");

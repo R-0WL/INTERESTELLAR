@@ -1,0 +1,166 @@
+{
+  "up_axis": "Z",
+  "width": 5.2,
+  "total_thickness": 0.16,
+  "preview_horizon_radius": 0.65,
+  "textures": "RGBA, straight alpha, sRGB RGB; alpha lineal",
+  "layers": [
+    {
+      "name": "Gas_01_borde",
+      "z": -0.08,
+      "texture": "disco_borde.png",
+      "opacity": 0.036,
+      "rotation_degrees": 0
+    },
+    {
+      "name": "Gas_02_borde",
+      "z": -0.07238095238095238,
+      "texture": "disco_borde.png",
+      "opacity": 0.036,
+      "rotation_degrees": 0
+    },
+    {
+      "name": "Gas_03_borde",
+      "z": -0.06476190476190477,
+      "texture": "disco_borde.png",
+      "opacity": 0.036,
+      "rotation_degrees": 0
+    },
+    {
+      "name": "Gas_04_borde",
+      "z": -0.05714285714285715,
+      "texture": "disco_borde.png",
+      "opacity": 0.036,
+      "rotation_degrees": 0
+    },
+    {
+      "name": "Gas_05_borde",
+      "z": -0.049523809523809526,
+      "texture": "disco_borde.png",
+      "opacity": 0.036,
+      "rotation_degrees": 0
+    },
+    {
+      "name": "Gas_06_medio",
+      "z": -0.0419047619047619,
+      "texture": "disco_medio.png",
+      "opacity": 0.057,
+      "rotation_degrees": 0
+    },
+    {
+      "name": "Gas_07_medio",
+      "z": -0.03428571428571429,
+      "texture": "disco_medio.png",
+      "opacity": 0.057,
+      "rotation_degrees": 0
+    },
+    {
+      "name": "Gas_08_medio",
+      "z": -0.026666666666666665,
+      "texture": "disco_medio.png",
+      "opacity": 0.057,
+      "rotation_degrees": 0
+    },
+    {
+      "name": "Gas_09_medio",
+      "z": -0.01904761904761905,
+      "texture": "disco_medio.png",
+      "opacity": 0.057,
+      "rotation_degrees": 0
+    },
+    {
+      "name": "Gas_10_centro",
+      "z": -0.011428571428571427,
+      "texture": "disco_centro.png",
+      "opacity": 0.078,
+      "rotation_degrees": 0
+    },
+    {
+      "name": "Gas_11_centro",
+      "z": -0.0038095238095238043,
+      "texture": "disco_centro.png",
+      "opacity": 0.078,
+      "rotation_degrees": 0
+    },
+    {
+      "name": "Gas_12_centro",
+      "z": 0.0038095238095238043,
+      "texture": "disco_centro.png",
+      "opacity": 0.078,
+      "rotation_degrees": 0
+    },
+    {
+      "name": "Gas_13_centro",
+      "z": 0.011428571428571427,
+      "texture": "disco_centro.png",
+      "opacity": 0.078,
+      "rotation_degrees": 0
+    },
+    {
+      "name": "Gas_14_medio",
+      "z": 0.01904761904761905,
+      "texture": "disco_medio.png",
+      "opacity": 0.057,
+      "rotation_degrees": 0
+    },
+    {
+      "name": "Gas_15_medio",
+      "z": 0.026666666666666672,
+      "texture": "disco_medio.png",
+      "opacity": 0.057,
+      "rotation_degrees": 0
+    },
+    {
+      "name": "Gas_16_medio",
+      "z": 0.03428571428571428,
+      "texture": "disco_medio.png",
+      "opacity": 0.057,
+      "rotation_degrees": 0
+    },
+    {
+      "name": "Gas_17_medio",
+      "z": 0.0419047619047619,
+      "texture": "disco_medio.png",
+      "opacity": 0.057,
+      "rotation_degrees": 0
+    },
+    {
+      "name": "Gas_18_borde",
+      "z": 0.04952380952380954,
+      "texture": "disco_borde.png",
+      "opacity": 0.036,
+      "rotation_degrees": 0
+    },
+    {
+      "name": "Gas_19_borde",
+      "z": 0.05714285714285715,
+      "texture": "disco_borde.png",
+      "opacity": 0.036,
+      "rotation_degrees": 0
+    },
+    {
+      "name": "Gas_20_borde",
+      "z": 0.06476190476190476,
+      "texture": "disco_borde.png",
+      "opacity": 0.036,
+      "rotation_degrees": 0
+    },
+    {
+      "name": "Gas_21_borde",
+      "z": 0.07238095238095239,
+      "texture": "disco_borde.png",
+      "opacity": 0.036,
+      "rotation_degrees": 0
+    },
+    {
+      "name": "Gas_22_borde",
+      "z": 0.08,
+      "texture": "disco_borde.png",
+      "opacity": 0.036,
+      "rotation_degrees": 0
+    }
+  ],
+  "palette": "naranja dorado, ambar y blanco calido",
+  "preview_emission_strength": 5,
+  "preview_exposure": 0.45
+}

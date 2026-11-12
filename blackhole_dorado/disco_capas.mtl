@@ -1,0 +1,154 @@
+newmtl Gas_01_borde
+Kd 1 1 1
+Ke 1 1 1
+d 0.036
+map_Kd disco_borde.png
+map_d disco_borde.png
+
+newmtl Gas_02_borde
+Kd 1 1 1
+Ke 1 1 1
+d 0.036
+map_Kd disco_borde.png
+map_d disco_borde.png
+
+newmtl Gas_03_borde
+Kd 1 1 1
+Ke 1 1 1
+d 0.036
+map_Kd disco_borde.png
+map_d disco_borde.png
+
+newmtl Gas_04_borde
+Kd 1 1 1
+Ke 1 1 1
+d 0.036
+map_Kd disco_borde.png
+map_d disco_borde.png
+
+newmtl Gas_05_borde
+Kd 1 1 1
+Ke 1 1 1
+d 0.036
+map_Kd disco_borde.png
+map_d disco_borde.png
+
+newmtl Gas_06_medio
+Kd 1 1 1
+Ke 1 1 1
+d 0.057
+map_Kd disco_medio.png
+map_d disco_medio.png
+
+newmtl Gas_07_medio
+Kd 1 1 1
+Ke 1 1 1
+d 0.057
+map_Kd disco_medio.png
+map_d disco_medio.png
+
+newmtl Gas_08_medio
+Kd 1 1 1
+Ke 1 1 1
+d 0.057
+map_Kd disco_medio.png
+map_d disco_medio.png
+
+newmtl Gas_09_medio
+Kd 1 1 1
+Ke 1 1 1
+d 0.057
+map_Kd disco_medio.png
+map_d disco_medio.png
+
+newmtl Gas_10_centro
+Kd 1 1 1
+Ke 1 1 1
+d 0.078
+map_Kd disco_centro.png
+map_d disco_centro.png
+
+newmtl Gas_11_centro
+Kd 1 1 1
+Ke 1 1 1
+d 0.078
+map_Kd disco_centro.png
+map_d disco_centro.png
+
+newmtl Gas_12_centro
+Kd 1 1 1
+Ke 1 1 1
+d 0.078
+map_Kd disco_centro.png
+map_d disco_centro.png
+
+newmtl Gas_13_centro
+Kd 1 1 1
+Ke 1 1 1
+d 0.078
+map_Kd disco_centro.png
+map_d disco_centro.png
+
+newmtl Gas_14_medio
+Kd 1 1 1
+Ke 1 1 1
+d 0.057
+map_Kd disco_medio.png
+map_d disco_medio.png
+
+newmtl Gas_15_medio
+Kd 1 1 1
+Ke 1 1 1
+d 0.057
+map_Kd disco_medio.png
+map_d disco_medio.png
+
+newmtl Gas_16_medio
+Kd 1 1 1
+Ke 1 1 1
+d 0.057
+map_Kd disco_medio.png
+map_d disco_medio.png
+
+newmtl Gas_17_medio
+Kd 1 1 1
+Ke 1 1 1
+d 0.057
+map_Kd disco_medio.png
+map_d disco_medio.png
+
+newmtl Gas_18_borde
+Kd 1 1 1
+Ke 1 1 1
+d 0.036
+map_Kd disco_borde.png
+map_d disco_borde.png
+
+newmtl Gas_19_borde
+Kd 1 1 1
+Ke 1 1 1
+d 0.036
+map_Kd disco_borde.png
+map_d disco_borde.png
+
+newmtl Gas_20_borde
+Kd 1 1 1
+Ke 1 1 1
+d 0.036
+map_Kd disco_borde.png
+map_d disco_borde.png
+
+newmtl Gas_21_borde
+Kd 1 1 1
+Ke 1 1 1
+d 0.036
+map_Kd disco_borde.png
+map_d disco_borde.png
+
+newmtl Gas_22_borde
+Kd 1 1 1
+Ke 1 1 1
+d 0.036
+map_Kd disco_borde.png
+map_d disco_borde.png
+
